@@ -37,7 +37,6 @@ STRICT_MODE_OFF //todo what does this do?
 #include <iostream>
 #include <math.h>
 #include <math_common.h>
-#include <mavros_msgs/msg/state.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <opencv2/opencv.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
@@ -307,6 +306,7 @@ private:
     static const std::unordered_map<int, std::string> image_type_int_to_string_map_;
 
     bool is_vulkan_; // rosparam obtained from launch file. If vulkan is being used, we BGR encoding instead of RGB
+    bool publish_grayscale_ = true; // publish mono8 grayscale images by default for SLAM efficiency
 
     std::string host_ip_;
     std::unique_ptr<msr::airlib::RpcLibClientBase> airsim_client_;

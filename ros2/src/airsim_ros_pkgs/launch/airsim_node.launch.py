@@ -27,6 +27,10 @@ def generate_launch_description():
         "host",
         default_value='localhost')
   
+    publish_grayscale = DeclareLaunchArgument(
+        "publish_grayscale",
+        default_value='True')
+
     airsim_node = Node(
             package='airsim_ros_pkgs',
             executable='airsim_node',
@@ -34,7 +38,8 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'is_vulkan': False,
-                'update_airsim_img_response_every_n_sec': 0.05,
+                'publish_grayscale': LaunchConfiguration('publish_grayscale'),
+                'update_airsim_img_response_every_n_sec': 0.01,
                 'update_airsim_control_every_n_sec': 0.01,
                 'update_lidar_every_n_sec': 0.01,
                 'publish_clock': LaunchConfiguration('publish_clock'),
@@ -55,6 +60,7 @@ def generate_launch_description():
     ld.add_action(publish_clock)
     ld.add_action(is_vulkan)
     ld.add_action(host)
+    ld.add_action(publish_grayscale)
   
     ld.add_action(static_transforms)
     ld.add_action(airsim_node)

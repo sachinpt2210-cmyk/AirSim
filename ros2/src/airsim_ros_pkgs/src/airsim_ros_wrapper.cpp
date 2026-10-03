@@ -74,8 +74,18 @@ void AirsimROSWrapper::initialize_airsim()
         airsim_client_lidar_.confirmConnection();
 
         for (const auto& vehicle_name_ptr_pair : vehicle_name_ptr_map_) {
-            airsim_client_->enableApiControl(true, vehicle_name_ptr_pair.first); // todo expose as rosservice?
-            airsim_client_->armDisarm(true, vehicle_name_ptr_pair.first); // todo exposes as rosservice?
+            try {
+                airsim_client_->enableApiControl(true, vehicle_name_ptr_pair.first);
+                airsim_client_->armDisarm(true, vehicle_name_ptr_pair.first);
+            }
+            catch (rpc::rpc_error& e) {
+                RCLCPP_WARN(nh_->get_logger(), "Vehicle '%s': API control not enabled yet (PX4 SITL not connected or in standby): %s",
+                            vehicle_name_ptr_pair.first.c_str(), e.get_error().as<std::string>().c_str());
+            }
+            catch (const std::exception& e) {
+                RCLCPP_WARN(nh_->get_logger(), "Vehicle '%s': API control not enabled yet: %s",
+                            vehicle_name_ptr_pair.first.c_str(), e.what());
+            }
         }
 
         origin_geo_point_ = get_origin_geo_point();
@@ -95,6 +105,7 @@ void AirsimROSWrapper::initialize_ros()
     // ros params
     double update_airsim_control_every_n_sec;
     nh_->get_parameter("is_vulkan", is_vulkan_);
+    nh_->get_parameter_or("publish_grayscale", publish_grayscale_, true);
     nh_->get_parameter("update_airsim_control_every_n_sec", update_airsim_control_every_n_sec);
     nh_->get_parameter("publish_clock", publish_clock_);
     nh_->get_parameter_or("world_frame_id", world_frame_id_, world_frame_id_);
@@ -1263,16 +1274,46 @@ std::shared_ptr<sensor_msgs::msg::Image> AirsimROSWrapper::get_img_msg_from_resp
 {
     unused(curr_ros_time);
     std::shared_ptr<sensor_msgs::msg::Image> img_msg_ptr = std::make_shared<sensor_msgs::msg::Image>();
-    img_msg_ptr->data = img_response.image_data_uint8;
-    img_msg_ptr->step = img_response.image_data_uint8.size() / img_response.height;
     img_msg_ptr->header.stamp = rclcpp::Time(img_response.time_stamp);
     img_msg_ptr->header.frame_id = frame_id;
     img_msg_ptr->height = img_response.height;
     img_msg_ptr->width = img_response.width;
-    img_msg_ptr->encoding = "bgr8";
-    if (is_vulkan_)
-        img_msg_ptr->encoding = "rgb8";
     img_msg_ptr->is_bigendian = 0;
+
+    int total_pixels = img_response.height * img_response.width;
+    if (publish_grayscale_ && total_pixels > 0 && img_response.image_data_uint8.size() >= static_cast<size_t>(total_pixels)) {
+        int channels = img_response.image_data_uint8.size() / total_pixels;
+        cv::Mat gray_img;
+        if (channels == 3) {
+            cv::Mat src_img(img_response.height, img_response.width, CV_8UC3, const_cast<uint8_t*>(img_response.image_data_uint8.data()));
+            if (is_vulkan_) {
+                cv::cvtColor(src_img, gray_img, cv::COLOR_RGB2GRAY);
+            } else {
+                cv::cvtColor(src_img, gray_img, cv::COLOR_BGR2GRAY);
+            }
+        } else if (channels == 4) {
+            cv::Mat src_img(img_response.height, img_response.width, CV_8UC4, const_cast<uint8_t*>(img_response.image_data_uint8.data()));
+            if (is_vulkan_) {
+                cv::cvtColor(src_img, gray_img, cv::COLOR_RGBA2GRAY);
+            } else {
+                cv::cvtColor(src_img, gray_img, cv::COLOR_BGRA2GRAY);
+            }
+        } else if (channels == 1) {
+            gray_img = cv::Mat(img_response.height, img_response.width, CV_8UC1, const_cast<uint8_t*>(img_response.image_data_uint8.data())).clone();
+        }
+
+        if (!gray_img.empty()) {
+            img_msg_ptr->encoding = "mono8";
+            img_msg_ptr->step = img_response.width;
+            img_msg_ptr->data.resize(total_pixels);
+            std::memcpy(img_msg_ptr->data.data(), gray_img.data, total_pixels);
+            return img_msg_ptr;
+        }
+    }
+
+    img_msg_ptr->data = img_response.image_data_uint8;
+    img_msg_ptr->step = img_response.image_data_uint8.size() / img_response.height;
+    img_msg_ptr->encoding = is_vulkan_ ? "rgb8" : "bgr8";
     return img_msg_ptr;
 }
 
